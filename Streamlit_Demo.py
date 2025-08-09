@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import sys
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -13,8 +13,9 @@ load_dotenv()
 # Add the src directory to the path so we can import our modules
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-# Import the q_a_agent from Master_Agent
-from src.Agents.Master_Agent import q_a_agent
+from agents import Runner, set_trace_processors, trace
+from weave.integrations.openai_agents.openai_agents import WeaveTracingProcessor
+import weave
 
 # Configure Streamlit page
 st.set_page_config(
@@ -24,11 +25,44 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Load selected environment variables from Streamlit secrets (overrides .env)
+def _load_env_from_streamlit_secrets():
+    try:
+        # Copy all keys exactly as named from st.secrets to environment without renaming
+        for key, value in st.secrets.items():
+            if value is not None:
+                os.environ[str(key)] = str(value)
+    except Exception:
+        # If st.secrets is not configured, just proceed
+        pass
+
+_load_env_from_streamlit_secrets()
+
+# Import the q_a_agent from Master_Agent AFTER env is set
+from src.Agents.Master_Agent import q_a_agent
+
 # Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "processing" not in st.session_state:
     st.session_state.processing = False
+if "tracing_enabled" not in st.session_state:
+    st.session_state.tracing_enabled = False
+if "weave_initialized" not in st.session_state:
+    st.session_state.weave_initialized = False
+if "weave_project" not in st.session_state:
+    st.session_state.weave_project = st.secrets.get("WEAVE_PROJECT", os.getenv("WEAVE_PROJECT", "client-genai-ops"))
+if "weave_entity" not in st.session_state:
+    st.session_state.weave_entity = st.secrets.get("WEAVE_ENTITY", os.getenv("WEAVE_ENTITY", ""))
+
+def initialize_tracing(project: str, entity: Optional[str] = None):
+    """Initialize Weave tracing and set the OpenAI Agents trace processor."""
+    if entity:
+        weave.init(project=project, entity=entity)
+    else:
+        weave.init(project=project)
+    set_trace_processors([WeaveTracingProcessor()])
+    st.session_state.weave_initialized = True
 
 def clear_conversation():
     """Clear the conversation history"""
@@ -69,16 +103,6 @@ def format_agent_output(output_data: Dict[str, Any]) -> str:
     markdown_content.append(f"**Hallucination Risk:** {emoji} {hallucination_score}\n")
     
     return "\n".join(markdown_content)
-
-async def process_user_query(user_input: str) -> Dict[str, Any]:
-    """Process user query with the q_a_agent"""
-    try:
-        # Run the agent with the user input
-        result = await q_a_agent.run(user_input)
-        return result
-    except Exception as e:
-        st.error(f"Error processing query: {str(e)}")
-        return None
 
 def display_message(message: Dict[str, str]):
     """Display a message in the chat interface"""
@@ -122,12 +146,37 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Tracing controls
+    st.markdown("### 🧭 Tracing & Logging")
+    st.caption("Powered by Weave (Weights & Biases)")
+    st.session_state.tracing_enabled = st.checkbox("Enable tracing (Weave)", value=st.session_state.tracing_enabled)
+    st.session_state.weave_project = st.text_input("Weave project", value=st.session_state.weave_project, help="Project name in Weave/W&B")
+    st.session_state.weave_entity = st.text_input("Weave entity (optional)", value=st.session_state.weave_entity, help="W&B entity/org (optional)")
+
+    if st.session_state.tracing_enabled and not st.session_state.weave_initialized:
+        try:
+            initialize_tracing(st.session_state.weave_project, st.session_state.weave_entity or None)
+            st.success("Weave tracing initialized")
+        except Exception as e:
+            st.error(f"Failed to initialize Weave: {e}")
+            st.session_state.tracing_enabled = False
+    elif not st.session_state.tracing_enabled and st.session_state.weave_initialized:
+        # Disable tracing by clearing processors
+        try:
+            set_trace_processors([])
+            st.session_state.weave_initialized = False
+            st.info("Tracing disabled")
+        except Exception as e:
+            st.warning(f"Unable to fully disable tracing: {e}")
+
+    st.markdown("---")
+
     # Display conversation count
     message_count = len([msg for msg in st.session_state.messages if msg["role"] == "user"])
     st.metric("Questions Asked", message_count)
 
 # Main interface
-st.title("🏦 Truist GenAI Operations Analysis Chatbot")
+st.title("🏦 Client GenAI Operations Analysis Chatbot")
 st.markdown("Ask questions about how Generative AI will impact banking operations and labor demand.")
 
 # Display conversation history
@@ -161,47 +210,67 @@ if prompt := st.chat_input("Ask about GenAI impact on banking operations...", di
             # Update progress during processing
             progress_bar.progress(20, text="🔎 Researching SEC filings...")
             
-            # Run the async agent
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
+            # Indicate calculation phase
             progress_bar.progress(40, text="🧮 Running calculations...")
             
-            try:
-                result = loop.run_until_complete(process_user_query(prompt))
-                progress_bar.progress(80, text="📝 Generating final analysis...")
-                
-                if result:
-                    # Format and display the result
-                    if hasattr(result, '__dict__'):
-                        # Convert to dictionary if it's a Pydantic model
-                        result_dict = result.__dict__ if hasattr(result, '__dict__') else result
-                    else:
-                        result_dict = result
-                    
-                    formatted_response = format_agent_output(result_dict)
-                    
-                    # Clear status and progress
-                    status_placeholder.empty()
-                    progress_placeholder.empty()
-                    
-                    # Display the formatted response
-                    content_placeholder.markdown(formatted_response)
-                    
-                    # Add assistant response to conversation
-                    st.session_state.messages.append({
-                        "role": "assistant", 
-                        "content": formatted_response
-                    })
-                    
-                    progress_bar.progress(100, text="✅ Analysis complete!")
-                    
+            # Use OpenAI Agent SDK Runner to execute the agent
+            with st.spinner("Running agent with OpenAI Agent SDK..."):
+                # Wrap the agent execution in a trace span if tracing is enabled
+                if st.session_state.tracing_enabled and st.session_state.weave_initialized:
+                    with trace("streamlit.chat_request"):
+                        result = asyncio.run(Runner.run(q_a_agent, prompt, max_turns=100))
                 else:
-                    status_placeholder.error("❌ Failed to process query. Please try again.")
-                    content_placeholder.markdown("Sorry, I encountered an error while processing your query. Please try rephrasing your question or check the system logs.")
-                    
-            finally:
-                loop.close()
+                    result = asyncio.run(Runner.run(q_a_agent, prompt, max_turns=100))
+
+            progress_bar.progress(80, text="📝 Generating final analysis...")
+            
+            if result is not None:
+                # Extract the agent's structured output
+                output_obj = getattr(result, "final_output", result)
+
+                if hasattr(output_obj, "dict"):
+                    result_dict = output_obj.dict()
+                elif hasattr(output_obj, "model_dump"):
+                    result_dict = output_obj.model_dump()
+                elif isinstance(output_obj, dict):
+                    result_dict = output_obj
+                else:
+                    # Fallback: build a dict from known fields if available
+                    candidate_fields = [
+                        "high_scenario",
+                        "medium_scenario",
+                        "low_scenario",
+                        "high_scenario_reasoning",
+                        "medium_scenario_reasoning",
+                        "low_scenario_reasoning",
+                        "hallucination_score",
+                    ]
+                    result_dict = {
+                        field: getattr(output_obj, field)
+                        for field in candidate_fields
+                        if hasattr(output_obj, field)
+                    }
+                
+                formatted_response = format_agent_output(result_dict)
+                
+                # Clear status and progress
+                status_placeholder.empty()
+                progress_placeholder.empty()
+                
+                # Display the formatted response
+                content_placeholder.markdown(formatted_response)
+                
+                # Add assistant response to conversation
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": formatted_response
+                })
+                
+                progress_bar.progress(100, text="✅ Analysis complete!")
+                
+            else:
+                status_placeholder.error("❌ Failed to process query. Please try again.")
+                content_placeholder.markdown("Sorry, I encountered an error while processing your query. Please try rephrasing your question or check the system logs.")
                 
         except Exception as e:
             status_placeholder.error(f"❌ Error: {str(e)}")
@@ -221,7 +290,7 @@ if prompt := st.chat_input("Ask about GenAI impact on banking operations...", di
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    🤖 Powered by OpenAI Agents | Built for Truist Operations Analysis
+    🤖 Powered by OpenAI Agents | Built for Client Operations Analysis
 </div>
 """, unsafe_allow_html=True)
 
