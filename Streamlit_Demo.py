@@ -18,7 +18,7 @@ from src.Agents.Master_Agent import q_a_agent
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Truist GenAI Operations Q&A Chatbot",
+    page_title="GenAI Operations Q&A Chatbot",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
