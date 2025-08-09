@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import sys
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -38,6 +38,18 @@ def _load_env_from_streamlit_secrets():
 
 _load_env_from_streamlit_secrets()
 
+# Initialize Weave tracing immediately and unconditionally
+_weave_project = os.getenv("WEAVE_PROJECT", "Operations Project")
+_weave_entity = os.getenv("WEAVE_ENTITY", None)
+try:
+    if _weave_entity:
+        weave.init(project=_weave_project, entity=_weave_entity)
+    else:
+        weave.init(project=_weave_project)
+    set_trace_processors([WeaveTracingProcessor()])
+except Exception as _weave_err:
+    st.warning(f"Weave initialization failed: {_weave_err}")
+
 # Import the q_a_agent from Master_Agent AFTER env is set
 from src.Agents.Master_Agent import q_a_agent
 
@@ -46,23 +58,6 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "processing" not in st.session_state:
     st.session_state.processing = False
-if "tracing_enabled" not in st.session_state:
-    st.session_state.tracing_enabled = False
-if "weave_initialized" not in st.session_state:
-    st.session_state.weave_initialized = False
-if "weave_project" not in st.session_state:
-    st.session_state.weave_project = st.secrets.get("WEAVE_PROJECT", os.getenv("WEAVE_PROJECT", "client-genai-ops"))
-if "weave_entity" not in st.session_state:
-    st.session_state.weave_entity = st.secrets.get("WEAVE_ENTITY", os.getenv("WEAVE_ENTITY", ""))
-
-def initialize_tracing(project: str, entity: Optional[str] = None):
-    """Initialize Weave tracing and set the OpenAI Agents trace processor."""
-    if entity:
-        weave.init(project=project, entity=entity)
-    else:
-        weave.init(project=project)
-    set_trace_processors([WeaveTracingProcessor()])
-    st.session_state.weave_initialized = True
 
 def clear_conversation():
     """Clear the conversation history"""
@@ -146,29 +141,11 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Tracing controls
-    st.markdown("### 🧭 Tracing & Logging")
-    st.caption("Powered by Weave (Weights & Biases)")
-    st.session_state.tracing_enabled = st.checkbox("Enable tracing (Weave)", value=st.session_state.tracing_enabled)
-    st.session_state.weave_project = st.text_input("Weave project", value=st.session_state.weave_project, help="Project name in Weave/W&B")
-    st.session_state.weave_entity = st.text_input("Weave entity (optional)", value=st.session_state.weave_entity, help="W&B entity/org (optional)")
-
-    if st.session_state.tracing_enabled and not st.session_state.weave_initialized:
-        try:
-            initialize_tracing(st.session_state.weave_project, st.session_state.weave_entity or None)
-            st.success("Weave tracing initialized")
-        except Exception as e:
-            st.error(f"Failed to initialize Weave: {e}")
-            st.session_state.tracing_enabled = False
-    elif not st.session_state.tracing_enabled and st.session_state.weave_initialized:
-        # Disable tracing by clearing processors
-        try:
-            set_trace_processors([])
-            st.session_state.weave_initialized = False
-            st.info("Tracing disabled")
-        except Exception as e:
-            st.warning(f"Unable to fully disable tracing: {e}")
-
+    # Tracing is initialized globally at startup; no user controls
+    st.caption("Tracing is enabled via Weave | Project: {}{}".format(
+        _weave_project,
+        f" (entity: {_weave_entity})" if _weave_entity else ""
+    ))
     st.markdown("---")
 
     # Display conversation count
@@ -215,11 +192,8 @@ if prompt := st.chat_input("Ask about GenAI impact on banking operations...", di
             
             # Use OpenAI Agent SDK Runner to execute the agent
             with st.spinner("Running agent with OpenAI Agent SDK..."):
-                # Wrap the agent execution in a trace span if tracing is enabled
-                if st.session_state.tracing_enabled and st.session_state.weave_initialized:
-                    with trace("streamlit.chat_request"):
-                        result = asyncio.run(Runner.run(q_a_agent, prompt, max_turns=100))
-                else:
+                # Always trace the chat request; WeaveTracingProcessor captures model/tool events
+                with trace("streamlit.chat_request"):
                     result = asyncio.run(Runner.run(q_a_agent, prompt, max_turns=100))
 
             progress_bar.progress(80, text="📝 Generating final analysis...")
