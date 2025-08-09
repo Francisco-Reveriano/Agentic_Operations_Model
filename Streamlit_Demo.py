@@ -39,16 +39,8 @@ def _load_env_from_streamlit_secrets():
 _load_env_from_streamlit_secrets()
 
 # Initialize Weave tracing immediately and unconditionally
-_weave_project = os.getenv("WEAVE_PROJECT", "Operations Project")
-_weave_entity = os.getenv("WEAVE_ENTITY", None)
-try:
-    if _weave_entity:
-        weave.init(project=_weave_project, entity=_weave_entity)
-    else:
-        weave.init(project=_weave_project)
-    set_trace_processors([WeaveTracingProcessor()])
-except Exception as _weave_err:
-    st.warning(f"Weave initialization failed: {_weave_err}")
+weave.init("Streamlit_Operations_Model")
+set_trace_processors([WeaveTracingProcessor()])
 
 # Import the q_a_agent from Master_Agent AFTER env is set
 from src.Agents.Master_Agent import q_a_agent
@@ -139,13 +131,6 @@ with st.sidebar:
     if st.button("🗑️ Clear Conversation", use_container_width=True):
         clear_conversation()
     
-    st.markdown("---")
-    
-    # Tracing is initialized globally at startup; no user controls
-    st.caption("Tracing is enabled via Weave | Project: {}{}".format(
-        _weave_project,
-        f" (entity: {_weave_entity})" if _weave_entity else ""
-    ))
     st.markdown("---")
 
     # Display conversation count
