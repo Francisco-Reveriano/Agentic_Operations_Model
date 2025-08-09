@@ -89,6 +89,16 @@ def format_agent_output(output_data: Dict[str, Any]) -> str:
     markdown_content.append("## 🎯 Quality Assessment")
     markdown_content.append(f"**Hallucination Risk:** {emoji} {hallucination_score}\n")
     
+    # Online coursework recommendations
+    courses = output_data.get('online_coursework', []) or []
+    markdown_content.append("## 📚 Recommended Online Coursework")
+    if isinstance(courses, list) and len(courses) > 0:
+        for course in courses:
+            markdown_content.append(f"- {course}")
+    else:
+        markdown_content.append("_No coursework recommendations returned._")
+    
+    
     return "\n".join(markdown_content)
 
 def display_message(message: Dict[str, str]):
