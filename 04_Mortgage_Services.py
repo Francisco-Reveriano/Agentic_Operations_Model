@@ -15,7 +15,8 @@ import argparse
 import asyncio
 import logging
 from typing import Any, Dict, Optional
-
+import warnings
+warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 
@@ -175,6 +176,11 @@ async def amain(args) -> int:
     onshore_cols = [c for c in ["ONSHORE TEAMMATE", "ONSHORE CW", "Est. Size- ONSHORE "] if c in df.columns]
     df["ONSHORE"] = df[onshore_cols].sum(axis=1) if onshore_cols else 0
     df["OFFSHORE"] = df["Est. Size- OFFSHORE"] if "Est. Size- OFFSHORE" in df.columns else 0
+    #df["ONSHORE"] = df["Est. Size- ONSHORE "]
+    #df["OFFSHORE"] = df["Est. Size- OFFSHORE"]
+    print(df.shape)
+    print(df.columns)
+    print(df.head())
 
     if args.limit is not None:
         df = df.head(args.limit)
@@ -233,10 +239,10 @@ async def amain(args) -> int:
 def parse_args(argv: Optional[list[str]] = None):
     parser = argparse.ArgumentParser(description="Async/parallel runner for Ops Overview prompts")
     parser.add_argument("--input", default="Data/Raw/Ops_Overview_Data_File.xlsx", help="Path to input Excel file")
-    parser.add_argument("--sheet", default="Mortgage Servicing", help="Sheet name to process")
-    parser.add_argument("--output", default="Data/Intermediate/Ops_Overview_Data_File_Processed.xlsx", help="Path to output Excel file")
-    parser.add_argument("--max-concurrency", type=int, default=8, help="Max concurrent row tasks")
-    parser.add_argument("--retries", type=int, default=3, help="Retries per agent call")
+    parser.add_argument("--sheet", default="Wholesale Banking - Cap Mar", help="Wholesale Banking - Cap Mar")
+    parser.add_argument("--output", default="Data/Intermediate/Ops_Overview_Data_File_Wholesale_Banking_Cap_Mar_Processed.xlsx", help="Path to output Excel file")
+    parser.add_argument("--max-concurrency", type=int, default=14, help="Max concurrent row tasks")
+    parser.add_argument("--retries", type=int, default=10, help="Retries per agent call")
     parser.add_argument("--limit", type=int, default=None, help="Optional: limit number of rows for a quick run")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     parser.add_argument("--no-weave", action="store_true", help="Disable Weave tracing even if available")
